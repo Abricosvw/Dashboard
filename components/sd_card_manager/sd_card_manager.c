@@ -280,64 +280,6 @@ esp_err_t sd_card_write_file(const char* path, const char* data) {
                     s_card->csd.sector_size);
         }
         
-        // First, try to verify the directory structure
-        ESP_LOGI(TAG, "Verifying SD card mount and directory structure...");
-        
-        // Check if mount point exists and is accessible
-        DIR* root_dir = opendir("/sdcard");
-        if (root_dir == NULL) {
-            ESP_LOGE(TAG, "Cannot open /sdcard directory (errno: %d)", errno);
-            xSemaphoreGive(sd_card_mutex);
-            return ESP_FAIL;
-        }
-        closedir(root_dir);
-        ESP_LOGI(TAG, "/sdcard directory is accessible");
-        
-        // Try a simple test file first
-        ESP_LOGI(TAG, "Testing simple file creation...");
-        FILE *test_f = fopen("/sdcard/test.txt", "w");
-        if (test_f != NULL) {
-            // Try to write some data
-            fprintf(test_f, "test data\n");
-            fflush(test_f);
-            fclose(test_f);
-            
-            // Verify the file was created
-            FILE *verify_f = fopen("/sdcard/test.txt", "r");
-            if (verify_f != NULL) {
-                char buffer[32];
-                fgets(buffer, sizeof(buffer), verify_f);
-                fclose(verify_f);
-                ESP_LOGI(TAG, "Simple file creation test passed - content: %s", buffer);
-            } else {
-                ESP_LOGE(TAG, "File created but cannot read back (errno: %d)", errno);
-            }
-            remove("/sdcard/test.txt");
-        } else {
-            ESP_LOGE(TAG, "Simple file creation failed (errno: %d)", errno);
-            // Continue anyway to try the actual file
-        }
-        
-        // Try creating a settings file to verify it works
-        ESP_LOGI(TAG, "Testing settings.cfg file creation...");
-        FILE *settings_test = fopen("/sdcard/settings.cfg", "w");
-        if (settings_test != NULL) {
-            fprintf(settings_test, "{\"test\":\"value\"}");
-            fclose(settings_test);
-            ESP_LOGI(TAG, "✓ Settings.cfg file creation successful");
-            
-            // Test reading it back
-            FILE *read_test = fopen("/sdcard/settings.cfg", "r");
-            if (read_test != NULL) {
-                char buffer[64];
-                fgets(buffer, sizeof(buffer), read_test);
-                fclose(read_test);
-                ESP_LOGI(TAG, "✓ Settings.cfg file read successful: %s", buffer);
-            }
-            remove("/sdcard/settings.cfg");
-        } else {
-            ESP_LOGE(TAG, "✗ Settings.cfg file creation failed (errno: %d)", errno);
-        }
         
         // Try to open the actual file with retry logic
         FILE *f = NULL;
