@@ -30,138 +30,82 @@ static sdmmc_host_t s_host = SDSPI_HOST_DEFAULT();
 static bool sd_card_initialized = false;
 
 esp_err_t sd_card_init(void) {
-    esp_err_t ret;
-
-    ESP_LOGI(TAG, "Initializing SD card");
-    
-    // If already initialized, try to deinitialize first
+    // If the card is already marked as initialized, perform a full de-initialization
+    // to ensure a clean state before attempting to initialize again.
     if (sd_card_initialized) {
-        ESP_LOGW(TAG, "SD card already initialized, deinitializing first...");
-        sd_card_deinit();
-        vTaskDelay(pdMS_TO_TICKS(200));  // Longer delay for proper cleanup
+        ESP_LOGW(TAG, "Card already initialized. Performing full de-init before re-initializing...");
+        sd_card_full_deinit();
+        vTaskDelay(pdMS_TO_TICKS(200)); // Delay after de-init
     }
 
-    // Options for mounting the filesystem.
-    // If format_if_mount_failed is set to true, SD card will be partitioned and
-    // formatted in case when mounting fails.
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = false,  // Don't auto-format, preserve existing data
-        .max_files = 10,                  // Increase max files
-        .allocation_unit_size = 0,        // Use default allocation unit size
-        .disk_status_check_enable = false // Disable disk status check for compatibility
-    };
+    esp_err_t ret = ESP_FAIL;
+    const int max_retries = 3;
 
-    ESP_LOGI(TAG, "Initializing SPI bus...");
-    ESP_LOGI(TAG, "SD Card pinout: MOSI=%d, MISO=%d, CLK=%d, CS=%d", 
-             PIN_NUM_MOSI, PIN_NUM_MISO, PIN_NUM_CLK, PIN_NUM_CS);
-    
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num = PIN_NUM_MOSI,
-        .miso_io_num = PIN_NUM_MISO,
-        .sclk_io_num = PIN_NUM_CLK,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 4000,
-    };
-    ret = spi_bus_initialize(s_host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (ret != ESP_OK) {
-        if (ret == ESP_ERR_INVALID_STATE) {
-            ESP_LOGW(TAG, "SPI bus already initialized, continuing...");
-            // This is OK, bus is already initialized
-        } else {
-            ESP_LOGE(TAG, "Failed to initialize bus: %s", esp_err_to_name(ret));
-            return ret;
+    ESP_LOGI(TAG, "Initializing SD card with robust retry logic...");
+
+    for (int attempt = 1; attempt <= max_retries; ++attempt) {
+        ESP_LOGI(TAG, "Initialization attempt %d/%d...", attempt, max_retries);
+
+        // Give the card some time to power up/stabilize before each attempt
+        vTaskDelay(pdMS_TO_TICKS(300 * attempt));
+
+        // Options for mounting the filesystem
+        esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+            .format_if_mount_failed = (attempt > 1), // Only format on retry
+            .max_files = 10,
+            .allocation_unit_size = 0,
+            .disk_status_check_enable = false
+        };
+
+        ESP_LOGI(TAG, "Initializing SPI bus...");
+        spi_bus_config_t bus_cfg = {
+            .mosi_io_num = PIN_NUM_MOSI,
+            .miso_io_num = PIN_NUM_MISO,
+            .sclk_io_num = PIN_NUM_CLK,
+            .quadwp_io_num = -1,
+            .quadhd_io_num = -1,
+            .max_transfer_sz = 4000,
+        };
+        ret = spi_bus_initialize(s_host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "Attempt %d: Failed to initialize SPI bus: %s", attempt, esp_err_to_name(ret));
+            sd_card_full_deinit(); // Clean up on failure
+            continue; // Go to next retry
         }
-    }
 
-    // This initializes the slot without card detect (CD) and write protect (WP) signals.
-    // Modify slot_config.gpio_cd and slot_config.gpio_wp if your board has these signals.
-    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_config.gpio_cs = PIN_NUM_CS;
-    slot_config.host_id = s_host.slot;
-    
-    // Additional compatibility settings
-    slot_config.gpio_cd = GPIO_NUM_NC;      // No card detect
-    slot_config.gpio_wp = GPIO_NUM_NC;      // No write protect
-    slot_config.gpio_int = GPIO_NUM_NC;     // No interrupt
+        sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
+        slot_config.gpio_cs = PIN_NUM_CS;
+        slot_config.host_id = s_host.slot;
+        slot_config.gpio_cd = GPIO_NUM_NC;
+        slot_config.gpio_wp = GPIO_NUM_NC;
+        slot_config.gpio_int = GPIO_NUM_NC;
 
-            // Reduce SPI frequency for better stability
-            s_host.max_freq_khz = 8000;  // 8 MHz for better stability (was 10 MHz)
-    
-    ESP_LOGI(TAG, "Mounting filesystem with reduced SPI frequency (%d kHz)", s_host.max_freq_khz);
-    ret = esp_vfs_fat_sdspi_mount(MOUNT_POINT, &s_host, &slot_config, &mount_config, &s_card);
-
-    if (ret != ESP_OK) {
-        if (ret == ESP_FAIL) {
-            ESP_LOGE(TAG, "Failed to mount filesystem. "
-                     "If you want the card to be formatted, set format_if_mount_failed = true.");
-        } else {
-            ESP_LOGE(TAG, "Failed to initialize the card (%s). "
-                     "Make sure SD card lines have pull-up resistors.", esp_err_to_name(ret));
-        }
-        
-        // Try alternative settings
-        ESP_LOGW(TAG, "Trying alternative mounting settings...");
-        
-                // Try with even slower frequency for problematic cards
-                s_host.max_freq_khz = 4000;  // 4 MHz for maximum compatibility
-        ESP_LOGI(TAG, "Retrying with %d kHz frequency", s_host.max_freq_khz);
-        
-        // Try with format enabled
-        mount_config.format_if_mount_failed = true;
-        ESP_LOGW(TAG, "Enabling auto-format for retry attempt");
+        s_host.max_freq_khz = (attempt == 1) ? 8000 : 4000;
+        ESP_LOGI(TAG, "Attempt %d: Mounting with SPI frequency %d kHz", attempt, s_host.max_freq_khz);
         
         ret = esp_vfs_fat_sdspi_mount(MOUNT_POINT, &s_host, &slot_config, &mount_config, &s_card);
-        
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Second attempt also failed (%s)", esp_err_to_name(ret));
-            return ret;
-        } else {
-            ESP_LOGI(TAG, "Second attempt succeeded with alternative settings");
+
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "Filesystem mounted successfully on attempt %d", attempt);
+            sdmmc_card_print_info(stdout, s_card);
+
+            sd_card_mutex = xSemaphoreCreateMutex();
+            if (sd_card_mutex == NULL) {
+                ESP_LOGE(TAG, "Failed to create SD card mutex");
+                sd_card_full_deinit();
+                continue; // This will count as a failed attempt
+            }
+
+            sd_card_initialized = true;
+            return ESP_OK; // Success, exit the function
         }
-    }
-    ESP_LOGI(TAG, "Filesystem mounted");
 
-    // Card has been initialized, print its properties
-    sdmmc_card_print_info(stdout, s_card);
-    
-    // Immediate test after mounting
-    ESP_LOGI(TAG, "Testing SD card access immediately after mounting...");
-    FILE* immediate_test = fopen("/sdcard/mount_test.tmp", "w");
-    if (immediate_test == NULL) {
-        ESP_LOGE(TAG, "CRITICAL: Cannot create files immediately after mounting! (errno: %d)", errno);
-        ESP_LOGE(TAG, "This indicates a problem with the mount process or card permissions");
-        // Don't fail here, continue with initialization
-    } else {
-        ESP_LOGI(TAG, "Immediate file creation test passed");
-        fprintf(immediate_test, "Mount test successful\n");
-        fclose(immediate_test);
-        remove("/sdcard/mount_test.tmp");
+        ESP_LOGE(TAG, "Attempt %d failed to mount filesystem: %s", attempt, esp_err_to_name(ret));
+        sd_card_full_deinit(); // Full cleanup after any failure before next retry
     }
 
-    // Create the mutex for thread-safe file access
-    sd_card_mutex = xSemaphoreCreateMutex();
-    if (sd_card_mutex == NULL) {
-        ESP_LOGE(TAG, "Failed to create SD card mutex");
-        // Cleanup already initialized resources
-        esp_vfs_fat_sdcard_unmount(MOUNT_POINT, s_card);
-        spi_bus_free(s_host.slot);
-        return ESP_ERR_NO_MEM;
-    }
-    ESP_LOGI(TAG, "SD card mutex created");
-    
-    // Mark SD card as initialized
-    sd_card_initialized = true;
-    
-    // Test write capability
-    const char* test_str = "SD Card initialized successfully\n";
-    if (sd_card_write_file("/sdcard/test.txt", test_str) == ESP_OK) {
-        ESP_LOGI(TAG, "SD card test write successful");
-    } else {
-        ESP_LOGW(TAG, "SD card test write failed - card may be read-only or full");
-    }
-
-    return ESP_OK;
+    ESP_LOGE(TAG, "All SD card initialization attempts failed.");
+    return ret; // Return the last error
 }
 
 esp_err_t sd_card_deinit(void) {
@@ -280,6 +224,64 @@ esp_err_t sd_card_write_file(const char* path, const char* data) {
                     s_card->csd.sector_size);
         }
         
+        // First, try to verify the directory structure
+        ESP_LOGI(TAG, "Verifying SD card mount and directory structure...");
+
+        // Check if mount point exists and is accessible
+        DIR* root_dir = opendir("/sdcard");
+        if (root_dir == NULL) {
+            ESP_LOGE(TAG, "Cannot open /sdcard directory (errno: %d)", errno);
+            xSemaphoreGive(sd_card_mutex);
+            return ESP_FAIL;
+        }
+        closedir(root_dir);
+        ESP_LOGI(TAG, "/sdcard directory is accessible");
+
+        // Try a simple test file first
+        ESP_LOGI(TAG, "Testing simple file creation...");
+        FILE *test_f = fopen("/sdcard/test.txt", "w");
+        if (test_f != NULL) {
+            // Try to write some data
+            fprintf(test_f, "test data\n");
+            fflush(test_f);
+            fclose(test_f);
+
+            // Verify the file was created
+            FILE *verify_f = fopen("/sdcard/test.txt", "r");
+            if (verify_f != NULL) {
+                char buffer[32];
+                fgets(buffer, sizeof(buffer), verify_f);
+                fclose(verify_f);
+                ESP_LOGI(TAG, "Simple file creation test passed - content: %s", buffer);
+            } else {
+                ESP_LOGE(TAG, "File created but cannot read back (errno: %d)", errno);
+            }
+            remove("/sdcard/test.txt");
+        } else {
+            ESP_LOGE(TAG, "Simple file creation failed (errno: %d)", errno);
+            // Continue anyway to try the actual file
+        }
+
+        // Run a non-destructive write test to a temporary file
+        ESP_LOGI(TAG, "Testing write access with temporary file...");
+        FILE *temp_test_file = fopen("/sdcard/write_test.tmp", "w");
+        if (temp_test_file != NULL) {
+            fprintf(temp_test_file, "write test");
+            fclose(temp_test_file);
+            ESP_LOGI(TAG, "✓ Temporary file write successful");
+
+            // Test reading it back
+            FILE *read_test = fopen("/sdcard/write_test.tmp", "r");
+            if (read_test != NULL) {
+                char buffer[64];
+                fgets(buffer, sizeof(buffer), read_test);
+                fclose(read_test);
+                ESP_LOGI(TAG, "✓ Temporary file read successful: %s", buffer);
+            }
+            remove("/sdcard/write_test.tmp");
+        } else {
+            ESP_LOGE(TAG, "✗ Temporary file write failed (errno: %d)", errno);
+        }
         
         // Try to open the actual file with retry logic
         FILE *f = NULL;
