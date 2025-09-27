@@ -1,12 +1,11 @@
 idf_component_register(
     SRCS
-        "sd_card_manager.c"
+        "i2c_utils.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
         "driver"
-        "fatfs"
-        "sdmmc"
         "log"
-        "ch422g"
+        "esp_console"
+        "argtable3"
 )

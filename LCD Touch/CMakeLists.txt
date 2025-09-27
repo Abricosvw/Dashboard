@@ -1,1 +1,13 @@
-idf_component_register(SRCS "esp_lcd_touch.c" INCLUDE_DIRS "include" REQUIRES "driver" "esp_lcd")
+idf_component_register(
+    SRCS
+        "display.c"
+        "esp_lcd_touch.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        "driver"
+        "esp_lcd"
+        "lvgl"
+        "esp_lcd_touch_gt911"
+        "log"
+)
