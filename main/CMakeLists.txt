@@ -25,12 +25,15 @@ idf_component_register(
         "include"
         "ui"
     REQUIRES
-        esp_lcd
-        lvgl
-        driver
-        esp_lcd_touch_gt911
-        esp_http_server
-        nvs_flash
-        esp_wifi
-        sd_card_manager
+        "esp_lcd"
+        "lvgl"
+        "driver"
+        "esp_lcd_touch_gt911"
+        "esp_http_server"
+        "nvs_flash"
+        "esp_wifi"
+        "sd_card_manager"
+        "ch422g"
+        "i2c_utils"
+        "esp_console"
 )
