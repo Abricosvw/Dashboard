@@ -1,0 +1,39 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "background_task.c"
+        "can_parser.c"
+        "can_websocket.c"
+        "canbus.c"
+        "ecu_data.c"
+        "web_server.c"
+        "wifi_server.c"
+        "cmd_i2ctools.c"  # Re-enabled - I2C conflict resolved with shared bus
+        "sd_card.c"
+        "ui/ui.c"
+        "ui/ui_helpers.c"
+        "ui/ui_screen_manager.c"
+        "ui/ui_updates.c"
+        "ui/settings_config.c"
+        "ui/components/ui_comp_hook.c"
+        "ui/screens/ui_Screen1.c"
+        "ui/screens/ui_Screen2.c"
+        "ui/screens/ui_Screen3.c"
+        "ui/screens/ui_Screen4.c"
+        "ui/screens/ui_Screen5.c"
+        "ui/screens/ui_Screen6.c"
+    INCLUDE_DIRS
+        "."
+        "include"
+        "ui"
+    REQUIRES
+        esp_lcd
+        lvgl
+        driver
+        esp_lcd_touch_gt911  # Re-enabled with compatibility wrapper
+        esp_http_server
+        nvs_flash
+        esp_wifi
+        fatfs
+        console  # Re-enabled - I2C conflict resolved with shared bus
+)
