@@ -1,0 +1,3 @@
+## ESP-IDF Component Manifest
+dependencies:
+  idf: ">=4.4"
