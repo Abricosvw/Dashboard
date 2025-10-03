@@ -8,8 +8,12 @@
 #include <math.h>
 #include "include/can_websocket.h"
 #include "ui/settings_config.h"
+#include "include/web_server.h" // Include the new header
 
 static const char *TAG = "WEB_SERVER";
+
+// Global handle for the single web server instance
+static httpd_handle_t server = NULL;
 
 // Simple HTML dashboard
 const char dashboard_html[] = R"HTML(
@@ -536,58 +540,6 @@ static esp_err_t dashboard_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-// Handler for CAN data
-static esp_err_t can_data_handler(httpd_req_t *req)
-{
-    ESP_LOGI(TAG, "CAN data handler called for URI: %s, method: %d", req->uri, req->method);
-    if (req->method == HTTP_GET) {
-        // Check if demo mode is enabled
-        bool demo_enabled = demo_mode_get_enabled();
-        ESP_LOGI(TAG, "🌐 Web server - demo mode check: %s", demo_enabled ? "ENABLED" : "DISABLED");
-
-        if (demo_enabled) {
-            // Return simulated CAN data for demo (since WebSocket server has real data)
-            char json_data[256];
-            static int demo_counter = 0;
-            demo_counter++;
-
-            // Generate demo data using simple periodic functions
-            int cycle = demo_counter % 100;
-            float phase = cycle / 100.0f;
-            float map_pressure = 120.0f + 30.0f * (cycle > 50 ? (100 - cycle) : cycle) / 50.0f;
-            float wastegate_pos = 45.0f + 25.0f * phase;
-            float tps_position = 35.0f + 30.0f * phase;
-            float engine_rpm = 2500.0f + 500.0f * phase;
-            float target_boost = 180.0f + 20.0f * phase;
-            int tcu_status = (demo_counter % 100 > 95) ? 1 : 0; // Occasional warning
-
-            snprintf(json_data, sizeof(json_data),
-                "{\"map_pressure\":%.1f,\"wastegate_pos\":%.1f,\"tps_position\":%.1f,"
-                "\"engine_rpm\":%.0f,\"target_boost\":%.1f,\"tcu_status\":%d}",
-                map_pressure, wastegate_pos, tps_position, engine_rpm, target_boost, tcu_status);
-
-            httpd_resp_set_type(req, "application/json");
-            httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-            httpd_resp_send(req, json_data, HTTPD_RESP_USE_STRLEN);
-            ESP_LOGI(TAG, "CAN demo data JSON sent successfully");
-        } else {
-            // Demo mode disabled, return zero values
-            char json_data[256];
-            snprintf(json_data, sizeof(json_data),
-                "{\"map_pressure\":0.0,\"wastegate_pos\":0.0,\"tps_position\":0.0,"
-                "\"engine_rpm\":0,\"target_boost\":0.0,\"tcu_status\":0}");
-
-            httpd_resp_set_type(req, "application/json");
-            httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-            httpd_resp_send(req, json_data, HTTPD_RESP_USE_STRLEN);
-            ESP_LOGI(TAG, "❌ Demo mode disabled, zero values sent to client");
-        }
-        return ESP_OK;
-    }
-    ESP_LOGW(TAG, "Invalid method for CAN data handler");
-    return ESP_FAIL;
-}
-
 // Start dashboard web server
 esp_err_t start_dashboard_web_server(void)
 {
@@ -595,7 +547,7 @@ esp_err_t start_dashboard_web_server(void)
     config.server_port = 80;
     config.max_open_sockets = 7;
     
-    httpd_handle_t server = NULL;
+    // server is now a global static variable
     
     ESP_LOGI(TAG, "Starting dashboard web server on port: %d", config.server_port);
     
@@ -618,14 +570,8 @@ esp_err_t start_dashboard_web_server(void)
         };
         httpd_register_uri_handler(server, &dashboard_alt_uri);
         
-        // Handler for CAN data
-        httpd_uri_t can_data_uri = {
-            .uri = "/data",
-            .method = HTTP_GET,
-            .handler = can_data_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(server, &can_data_uri);
+        // The /data handler is now removed from here and will be registered
+        // by the can_websocket component.
         
         ESP_LOGI(TAG, "Dashboard web server started successfully");
         return ESP_OK;
@@ -633,4 +579,10 @@ esp_err_t start_dashboard_web_server(void)
     
     ESP_LOGE(TAG, "Error starting dashboard web server");
     return ESP_FAIL;
+}
+
+// Gets the handle of the running web server
+httpd_handle_t web_server_get_handle(void)
+{
+    return server;
 }

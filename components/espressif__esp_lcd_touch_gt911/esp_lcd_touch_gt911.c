@@ -215,13 +215,17 @@ static esp_err_t esp_lcd_touch_gt911_exit_sleep(esp_lcd_touch_handle_t tp)
 
 esp_err_t esp_lcd_touch_gt911_wake_up(esp_lcd_touch_handle_t tp)
 {
-    ESP_LOGI(TAG, "Pinging GT911 to wake it up...");
-    uint8_t product_id[4];
-    esp_err_t ret = touch_gt911_i2c_read(tp, ESP_LCD_TOUCH_GT911_PRODUCT_ID_REG, product_id, 3);
+    ESP_LOGI(TAG, "Waking up GT911 by writing to a register...");
+
+    // Writing any value to a valid register should wake up the chip.
+    // We'll write 0 to the command register to clear any pending touch data,
+    // which is a safe and effective way to wake it up.
+    esp_err_t ret = touch_gt911_i2c_write(tp, ESP_LCD_TOUCH_GT911_READ_XY_REG, 0);
+
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to ping GT911, I2C read error!");
+        ESP_LOGE(TAG, "Failed to wake up GT911, I2C write error!");
     } else {
-        ESP_LOGI(TAG, "GT911 ping successful. Product ID: %c%c%c", product_id[0], product_id[1], product_id[2]);
+        ESP_LOGI(TAG, "GT911 wakeup command sent successfully.");
     }
     return ret;
 }

@@ -23,7 +23,8 @@ static esp_err_t data_handler(httpd_req_t *req);
 
 // Global CAN data (moved to header for external access)
 static can_data_t g_can_data = {0};
-static httpd_handle_t ws_server = NULL;
+// The server handle is now managed by web_server.c
+// static httpd_handle_t ws_server = NULL;
 
 // WebSocket handler for basic HTTP upgrade
 static esp_err_t ws_handler(httpd_req_t *req)
@@ -185,48 +186,42 @@ void update_websocket_can_data(uint16_t rpm, uint16_t map, uint8_t tps,
     }
 }
 
-// Start WebSocket server (simplified HTTP server for now)
-esp_err_t start_websocket_server(void)
+// Registers WebSocket handlers on an existing server
+esp_err_t can_websocket_register_handlers(httpd_handle_t server)
 {
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.server_port = 8081;  // Use different port to avoid conflict with main HTTP server
-    config.max_open_sockets = 7;
-
-    ESP_LOGI(TAG, "Starting WebSocket server on port: '%d'", config.server_port);
-    
-    if (httpd_start(&ws_server, &config) == ESP_OK) {
-        httpd_uri_t ws_uri = {
-            .uri = "/ws",
-            .method = HTTP_GET,
-            .handler = ws_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(ws_server, &ws_uri);
-        
-        // Add data endpoint
-        httpd_uri_t data_uri = {
-            .uri = "/data",
-            .method = HTTP_GET,
-            .handler = data_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(ws_server, &data_uri);
-        
-        ESP_LOGI(TAG, "WebSocket server started");
-        return ESP_OK;
+    if (server == NULL) {
+        ESP_LOGE(TAG, "Server handle is NULL, cannot register handlers");
+        return ESP_ERR_INVALID_ARG;
     }
-    
-    ESP_LOGE(TAG, "Error starting WebSocket server");
-    return ESP_FAIL;
-}
 
-// Stop WebSocket server
-void stop_websocket_server(void)
-{
-    if (ws_server) {
-        httpd_stop(ws_server);
-        ws_server = NULL;
+    httpd_uri_t ws_uri = {
+        .uri = "/ws",
+        .method = HTTP_GET,
+        .handler = ws_handler,
+        .user_ctx = NULL,
+        .is_websocket = true
+    };
+    esp_err_t ret = httpd_register_uri_handler(server, &ws_uri);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register WebSocket URI handler: %s", esp_err_to_name(ret));
+        return ret;
     }
+
+    // Add data endpoint
+    httpd_uri_t data_uri = {
+        .uri = "/data",
+        .method = HTTP_GET,
+        .handler = data_handler,
+        .user_ctx = NULL
+    };
+    ret = httpd_register_uri_handler(server, &data_uri);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register data URI handler: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "WebSocket and data handlers registered successfully");
+    return ESP_OK;
 }
 
 // WebSocket broadcast task

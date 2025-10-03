@@ -6,9 +6,7 @@
 #define CAN_WEBSOCKET_H
 
 #include "esp_err.h"
-
-// Initialize and start data server
-esp_err_t start_websocket_server(void);
+#include "esp_http_server.h" // Needed for httpd_handle_t
 
 // Get current CAN data for debugging
 typedef struct {
@@ -21,8 +19,13 @@ typedef struct {
     bool     data_valid;
 } can_data_t;
 
-// Stop data server
-void stop_websocket_server(void);
+/**
+ * @brief Registers WebSocket and data handlers on an existing HTTP server.
+ *
+ * @param server The handle to the HTTP server instance.
+ * @return esp_err_t ESP_OK on success, or an error code on failure.
+ */
+esp_err_t can_websocket_register_handlers(httpd_handle_t server);
 
 // Update CAN data for broadcast
 void update_websocket_can_data(uint16_t rpm, uint16_t map, uint8_t tps,

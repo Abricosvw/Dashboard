@@ -190,6 +190,20 @@ void app_main(void)
     esp_err_t web_ret = start_dashboard_web_server();
     if (web_ret == ESP_OK) {
         ESP_LOGI(TAG, "Web server started successfully!");
+
+        // Get the server handle and register WebSocket handlers
+        httpd_handle_t server_handle = web_server_get_handle();
+        if (server_handle) {
+            esp_err_t ws_ret = can_websocket_register_handlers(server_handle);
+            if (ws_ret == ESP_OK) {
+                ESP_LOGI(TAG, "WebSocket handlers registered successfully!");
+            } else {
+                ESP_LOGE(TAG, "Failed to register WebSocket handlers: %s", esp_err_to_name(ws_ret));
+            }
+        } else {
+            ESP_LOGE(TAG, "Failed to get web server handle!");
+        }
+
     } else {
         ESP_LOGE(TAG, "Failed to start web server: %s", esp_err_to_name(web_ret));
     }
@@ -209,15 +223,10 @@ void app_main(void)
             xTaskCreate(canbus_task, "can_task", 4096, NULL, 10, NULL);
             ESP_LOGI(TAG, "CAN task created");
 
-            // Start WebSocket server for CAN data (port 8080)
-            esp_err_t ws_ret = start_websocket_server();
-            if (ws_ret == ESP_OK) {
-                ESP_LOGI(TAG, "WebSocket server for CAN started successfully!");
-                // Create WebSocket broadcast task
-                xTaskCreate(websocket_broadcast_task, "ws_broadcast", 4096, NULL, 5, NULL);
-            } else {
-                ESP_LOGE(TAG, "Failed to start WebSocket server: %s", esp_err_to_name(ws_ret));
-            }
+            // Create WebSocket broadcast task
+            // This task will now work correctly as handlers are registered
+            xTaskCreate(websocket_broadcast_task, "ws_broadcast", 4096, NULL, 5, NULL);
+
         } else {
             ESP_LOGE(TAG, "Failed to start CAN bus: %s", esp_err_to_name(can_ret));
         }
